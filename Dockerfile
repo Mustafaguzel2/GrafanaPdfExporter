@@ -18,6 +18,7 @@ COPY grafana_pdf.js .
 COPY server.js .
 COPY .env ./
 COPY generate-pdf.sh ./
+COPY Reporting_A1_logo.png ./
 
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 

@@ -3,6 +3,7 @@
 const puppeteer = require('puppeteer');
 const fetch = require('node-fetch');
 const fs = require('fs');
+const path = require('path');
 
 console.log("Script grafana_pdf.js started...");
 
@@ -368,6 +369,65 @@ const auth_header = 'Basic ' + Buffer.from(auth_string).toString('base64');
             window.scrollTo(0, 0);
         });
 
+        // Add A1 logo to the bottom right corner - try with error handling
+        try {
+            // List of potential logo paths to try
+            const potentialLogoPaths = [
+                'Reporting_A1_logo.png',                     // Current directory
+                path.resolve('Reporting_A1_logo.png'),       // Absolute path
+                path.resolve(__dirname, 'Reporting_A1_logo.png'), // Script directory
+                '/app/Reporting_A1_logo.png',                // Common Docker container root
+                path.resolve('/app/Reporting_A1_logo.png')   // Absolute Docker container path
+            ];
+            
+            let logoBase64 = null;
+            
+            // Try each potential path
+            for (const logoPath of potentialLogoPaths) {
+                try {
+                    console.log(`Trying to read logo from: ${logoPath}`);
+                    if (fs.existsSync(logoPath)) {
+                        logoBase64 = fs.readFileSync(logoPath, { encoding: 'base64' });
+                        console.log(`Successfully loaded logo from: ${logoPath}`);
+                        break;
+                    }
+                } catch (err) {
+                    console.log(`Failed to read logo from: ${logoPath}`);
+                }
+            }
+            
+            // If we found a logo file, add it to the page
+            if (logoBase64) {
+                const logoDataUrl = `data:image/png;base64,${logoBase64}`;
+                
+                // Add the logo to the page
+                await page.evaluate((logoDataUrl) => {
+                    // Create a container for the logo
+                    const logoContainer = document.createElement('div');
+                    logoContainer.style.position = 'fixed';
+                    logoContainer.style.bottom = '10px';
+                    logoContainer.style.right = '10px';
+                    logoContainer.style.zIndex = '9999';
+                    
+                    // Create an image element for the logo
+                    const logoImg = document.createElement('img');
+                    logoImg.src = logoDataUrl;
+                    logoImg.style.width = '80px';
+                    logoImg.style.height = 'auto';
+                    logoImg.style.opacity = '0.9';
+                    
+                    // Add the image to the container and the container to the body
+                    logoContainer.appendChild(logoImg);
+                    document.body.appendChild(logoContainer);
+                }, logoDataUrl);
+                console.log("A1 logo added to PDF");
+            } else {
+                console.log("Warning: Could not find the A1 logo file. PDF will be generated without the logo.");
+            }
+        } catch (logoError) {
+            console.log("Warning: Error adding logo to PDF:", logoError.message);
+            console.log("Continuing PDF generation without logo");
+        }
 
         console.log("Generating PDF...");
         await page.pdf({
