@@ -166,6 +166,83 @@ The project consists of three main components:
 2. **PDF Generator** (`grafana_pdf.js`): Uses Puppeteer to render and capture Grafana dashboards
 3. **Grafana Integration** (`grafana-button.html`): Injects UI controls into Grafana for user-friendly exports
 
+## 🔒 Security Improvements
+
+### Recent Authentication Updates
+
+1. **Session-Based Authentication**
+   - Switched to using Grafana's native session cookies
+   - Secure cookie forwarding between frontend and PDF service
+   - Automatic session verification with Grafana's `/api/user` endpoint
+   - No storage of sensitive credentials
+
+2. **Enhanced CORS Security**
+   ```javascript
+   cors({
+       origin: true,  // Configure with specific origins in production
+       credentials: true,
+       methods: ['GET', 'POST', 'OPTIONS'],
+       allowedHeaders: ['Content-Type', 'Cookie']
+   })
+   ```
+
+3. **Docker Network Security**
+   - Automatic URL transformation for secure container communication
+   - `localhost` to `host.docker.internal` conversion
+   - Proper cross-container networking support
+   - Environment variable-based URL configuration
+
+4. **Improved Error Handling**
+   - Detailed error messages with debugging information
+   - Secure error responses without sensitive data exposure
+   - Special handling for common issues:
+     * Connection refused errors
+     * Invalid sessions
+     * Missing cookies
+     * Network connectivity problems
+
+### Security Best Practices
+
+1. **Cookie Management**
+   - Secure cookie forwarding
+   - No persistent cookie storage
+   - Regular session verification
+   - Cookie-based authentication flow
+
+2. **Production Deployment**
+   - Configure strict CORS with specific origins
+   - Enable HTTPS (recommended)
+   - Set appropriate environment variables
+   - Implement rate limiting
+   - Use secure network configurations
+
+3. **Error Handling**
+   - Sanitized error messages
+   - Detailed logging for debugging
+   - Proper error status codes
+   - Secure error response format
+
+### Debugging Authentication
+
+If you encounter authentication issues:
+
+1. **Check Cookie Forwarding**
+   - Verify cookies in browser developer tools
+   - Ensure `credentials: 'include'` in fetch requests
+   - Check for proper CORS headers
+
+2. **Verify Grafana Connection**
+   - Confirm Grafana is accessible
+   - Check URL configurations
+   - Verify network connectivity
+   - Ensure proper Docker networking
+
+3. **Common Solutions**
+   - Update Grafana URL in `.env`
+   - Check container networking
+   - Verify user permissions
+   - Review server logs for detailed errors
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
