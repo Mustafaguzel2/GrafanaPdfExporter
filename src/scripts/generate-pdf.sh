@@ -53,18 +53,34 @@ if [ -n "$GF_TO" ]; then
 fi
 JSON_PAYLOAD="${JSON_PAYLOAD}}"
 
+# Get the server port from environment or use default
+SERVER_PORT=${EXPORT_SERVER_PORT:-3001}
+
 # Send the HTTP POST request to the Node.js server to generate the PDF
-RESPONSE=$(curl -s -X POST http://localhost:3001/generate-pdf -H "Content-Type: application/json" -d "$JSON_PAYLOAD")
+RESPONSE=$(curl -s -X POST http://localhost:${SERVER_PORT}/generate-pdf \
+  -H "Content-Type: application/json" \
+  -H "Cookie: grafana_session=${GF_USER}:${GF_PASSWORD}" \
+  -d "$JSON_PAYLOAD")
+
+# Check if curl command was successful
+if [ $? -ne 0 ]; then
+  echo "Error: Failed to connect to the server. Make sure the server is running on port ${SERVER_PORT}"
+  exit 1
+fi
 
 # Check if the response is valid JSON
 if echo "$RESPONSE" | jq . >/dev/null 2>&1; then
   PDF_URL=$(echo $RESPONSE | jq -r '.pdfUrl')
   if [ "$PDF_URL" != "null" ]; then
-    echo "PDF generated: $PDF_URL"
+    echo "PDF generated successfully!"
+    echo "PDF URL: $PDF_URL"
   else
     echo "Error generating PDF"
     echo "Server response: $RESPONSE"
+    exit 1
   fi
 else
-  echo "Error: The server response is not valid JSON. Raw response: $RESPONSE"
+  echo "Error: The server response is not valid JSON"
+  echo "Raw response: $RESPONSE"
+  exit 1
 fi

@@ -1,4 +1,4 @@
-FROM node:latest
+FROM node:latest AS base
 
 WORKDIR /usr/src/app
 
@@ -12,18 +12,26 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install
-
-COPY grafana_pdf.js .
-COPY server.js .
-COPY .env ./
-COPY generate-pdf.sh ./
-COPY Reporting_A1_logo.png ./
-
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Development stage
+FROM base AS development
+RUN npm install
+COPY . .
+CMD ["npm", "run", "dev"]
+
+# Production stage
+FROM base AS production
+RUN npm ci --only=production
+
+# Create necessary directories and copy files
+COPY src/ ./src/
+COPY .env ./
+COPY src/scripts/generate-pdf.sh ./
+COPY src/utils/grafana_pdf.js ./grafana_pdf.js
 
 # Default port 3001 if not found in .env
 ARG EXPORT_SERVER_PORT=3001
 EXPOSE ${EXPORT_SERVER_PORT}
 
-CMD ["node", "server.js"]
+CMD ["node", "src/server.js"]
