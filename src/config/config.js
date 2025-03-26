@@ -15,6 +15,10 @@ const config = {
     },
     server: {
         port: process.env.EXPORT_SERVER_PORT || 3001
+    },
+    ssl: {
+        key: process.env.SSL_KEY_PATH,
+        cert: process.env.SSL_CERT_PATH
     }
 };
 
