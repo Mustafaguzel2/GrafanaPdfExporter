@@ -9,10 +9,16 @@ const fs = require('fs');
 const { fork } = require('child_process');
 const axios = require('axios');
 const cookieParser = require('cookie-parser');
+const nodemailer = require('nodemailer');
 
 const GRAFANA_USER = process.env.GRAFANA_USER;
 const GRAFANA_PASSWORD = process.env.GRAFANA_PASSWORD;
 const GRAFANA_URL = process.env.GRAFANA_URL || 'http://host.docker.internal:3000';
+const SMTP_HOST = process.env.SMTP_HOST;
+const SMTP_PORT = process.env.SMTP_PORT;
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const SMTP_FROM = process.env.SMTP_FROM;
 
 const app = express();
 const port = process.env.EXPORT_SERVER_PORT || 3001;
@@ -60,6 +66,17 @@ app.use(helmet({
 }));
 
 app.use('/output', express.static(path.join(__dirname, 'output')));
+
+// Create email transporter
+const transporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: true,
+    auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASS
+    }
+});
 
 // Authentication middleware using forwarded cookies
 const authenticateRequest = async (req, res, next) => {
@@ -233,6 +250,38 @@ app.post('/generate-pdf', authenticateRequest, (req, res) => {
     } catch (error) {
         console.error('Error processing PDF generation request:', error);
         res.status(500).send(`Error processing request: ${error.message}`);
+    }
+});
+
+// Add email sending endpoint
+app.post('/send-email', authenticateRequest, async (req, res) => {
+    const { to, subject, pdfUrl, dashboardName } = req.body;
+
+    if (!to || !pdfUrl) {
+        return res.status(400).json({ error: 'Recipient email and PDF URL are required' });
+    }
+
+    try {
+        // Download the PDF file
+        const response = await axios.get(pdfUrl, { responseType: 'arraybuffer' });
+        const pdfBuffer = Buffer.from(response.data);
+
+        // Send email with PDF attachment
+        await transporter.sendMail({
+            from: SMTP_FROM,
+            to: to,
+            subject: subject || `Grafana Dashboard: ${dashboardName || 'Export'}`,
+            text: `Please find attached the Grafana dashboard export.`,
+            attachments: [{
+                filename: `dashboard-${Date.now()}.pdf`,
+                content: pdfBuffer
+            }]
+        });
+
+        res.json({ success: true, message: 'Email sent successfully' });
+    } catch (error) {
+        console.error('Error sending email:', error);
+        res.status(500).json({ error: 'Failed to send email', details: error.message });
     }
 });
 
