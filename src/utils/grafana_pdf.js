@@ -7,11 +7,17 @@ const path = require("path");
 
 console.log("Script grafana_pdf.js started...");
 
+// Arguman sirasi pdfController'daki fork cagrisiyla ayni olmali:
+// fork(script, [finalUrl, auth_string, '', cookies])
+//   argv[2] = url, argv[3] = auth_string, argv[4] = (bos), argv[5] = cookies
 const url = process.argv[2];
 const auth_string = process.argv[3];
-const rawCookies = process.argv[4] || "";
-let outfile = process.argv[3] || "./output/default_dashboard.pdf";
-const outputDir = path.dirname(outfile);
+const rawCookies = process.argv[5] || "";
+
+// PDF her zaman /usr/src/app/output klasorune yazilir (compose'da mount edili
+// ve /output URL'i buradan servis ediliyor). Dosya adi asagida dashboard'a gore belirlenir.
+const outputDir = path.resolve(__dirname, "../../output");
+let outfile = path.join(outputDir, "default_dashboard.pdf");
 
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
@@ -199,8 +205,8 @@ const parsePuppeteerCookies = (rawCookieString, finalUrl) => {
     console.log("Output file path:", outfile);
 
     const dimensions = await page.evaluate(() => {
-      const dashboard = document.querySelector(".react-grid-layout") || 
-                        document.querySelector(".dashboard-container") || 
+      const dashboard = document.querySelector(".react-grid-layout") ||
+                        document.querySelector(".dashboard-container") ||
                         document.querySelector(".dashboard");
 
       if (!dashboard) {
