@@ -7,13 +7,12 @@ const path = require("path");
 
 console.log("Script grafana_pdf.js started...");
 
-// Ensure outfile has a default value if process.argv[4] is undefined
 const url = process.argv[2];
 const auth_string = process.argv[3];
-let outfile = process.argv[4] || "./output/default_dashboard.pdf"; // Fallback if undefined
-
-// Ensure the output directory exists
+const rawCookies = process.argv[4] || "";
+let outfile = process.argv[3] || "./output/default_dashboard.pdf";
 const outputDir = path.dirname(outfile);
+
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
   console.log(`Created output directory: ${outputDir}`);
@@ -21,13 +20,44 @@ if (!fs.existsSync(outputDir)) {
 
 const width_px = parseInt(process.env.PDF_WIDTH_PX, 10) || 1200;
 console.log("PDF width set to:", width_px);
-const height_px = parseInt(process.env.PDF_HEIGHT_PX, 10) || 800; // Initial viewport height
-
+const height_px = parseInt(process.env.PDF_HEIGHT_PX, 10) || 800;
 const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
+
+const parsePuppeteerCookies = (rawCookieString, finalUrl) => {
+  if (!rawCookieString || !finalUrl) return [];
+
+  const targetUrl = new URL(finalUrl);
+  const cookieList = rawCookieString
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .filter(Boolean)
+    .map((cookie) => {
+      const separatorIndex = cookie.indexOf("=");
+      const name = separatorIndex >= 0 ? cookie.slice(0, separatorIndex).trim() : cookie.trim();
+      const value = separatorIndex >= 0 ? cookie.slice(separatorIndex + 1).trim() : "";
+
+      if (!name) {
+        return null;
+      }
+
+      return {
+        name,
+        value,
+        domain: targetUrl.hostname,
+        path: "/",
+        httpOnly: false,
+        secure: targetUrl.protocol === "https:",
+        sameSite: "Lax",
+      };
+    })
+    .filter(Boolean);
+
+  console.log("Parsed Grafana cookies for browser:", cookieList.map((cookie) => cookie.name));
+  return cookieList;
+};
 
 (async () => {
   try {
-    // Validate input arguments
     if (!url || !auth_string) {
       throw new Error("URL and auth_string are required arguments.");
     }
@@ -70,10 +100,24 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
     const page = await browser.newPage();
     console.log("Browser started...");
 
+    page.on("requestfailed", (request) => {
+      console.log("Request failed:", request.url(), request.failure()?.errorText);
+    });
+
+    page.on("response", (response) => {
+      if (!response.ok()) {
+        console.log("Bad HTTP response:", response.status(), response.url());
+      }
+    });
+
     await page.setExtraHTTPHeaders({ Authorization: auth_header });
-    await page.setDefaultNavigationTimeout(
-      process.env.PUPPETEER_NAVIGATION_TIMEOUT || 120000
-    );
+    await page.setDefaultNavigationTimeout(process.env.PUPPETEER_NAVIGATION_TIMEOUT || 120000);
+
+    const cookiesForBrowser = parsePuppeteerCookies(rawCookies, finalUrl);
+    if (cookiesForBrowser.length > 0) {
+      await page.setCookie(...cookiesForBrowser);
+      console.log("Grafana cookies injected into browser session.");
+    }
 
     await page.setViewport({
       width: width_px,
@@ -83,21 +127,19 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
     });
 
     console.log("Navigating to URL...");
-    await page.goto(finalUrl, { waitUntil: "networkidle0" });
+    await page.goto(finalUrl, { waitUntil: "domcontentloaded", timeout: process.env.PUPPETEER_NAVIGATION_TIMEOUT || 120000 });
+    await page.waitForTimeout(3000);
     console.log("Page loaded...");
 
-    // Remove Grafana padding and apply full width
     await page.evaluate(() => {
       document.body.style.margin = '0';
       document.body.style.padding = '0';
-      
-      // Remove default grafana padding
+
       const grafanaApp = document.querySelector('.grafana-app');
       if (grafanaApp) {
         grafanaApp.style.padding = '0';
       }
-      
-      // Ensure all containers are full width
+
       const containers = document.querySelectorAll('.dashboard-container, .react-grid-layout');
       containers.forEach(container => {
         container.style.width = '100%';
@@ -111,11 +153,9 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
     });
     console.log(`Detected ${panelCount} panels in the dashboard`);
 
-    // Pre-scroll to load all content
     await page.evaluate(async () => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-      const scrollable =
-        document.querySelector(".scrollbar-view") || document.body;
+      const scrollable = document.querySelector(".scrollbar-view") || document.body;
       const fullHeight = Math.max(
         document.body.scrollHeight,
         document.documentElement.scrollHeight,
@@ -130,7 +170,6 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
       await sleep(500);
     });
 
-    // Get dashboard name and generate filename
     const dashboardTitle = await page.evaluate(() => {
       const selectors = [
         'div[data-testid="dashboard-title"]',
@@ -153,20 +192,17 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
       urlParts.searchParams.get("to") || "now"
     }`.replace(/[^\w-]/g, "_");
 
-    // Reassign outfile with a proper path
     outfile = path.join(
       outputDir,
       `${dashboardName.replace(/[^\w-]/g, "_").toLowerCase()}_${date}.pdf`
     );
     console.log("Output file path:", outfile);
-    
-    // Calculate exact content dimensions based on dashboard content
+
     const dimensions = await page.evaluate(() => {
-      // Get dashboard container or fall back to body
       const dashboard = document.querySelector(".react-grid-layout") || 
                         document.querySelector(".dashboard-container") || 
                         document.querySelector(".dashboard");
-      
+
       if (!dashboard) {
         console.log("Dashboard container not found, using document body");
         return {
@@ -174,10 +210,10 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
           height: document.body.scrollHeight
         };
       }
-      
+
       const panels = document.querySelectorAll(".panel-container");
       console.log(`Found ${panels.length} panels to calculate dimensions`);
-      
+
       if (panels.length === 0) {
         console.log("No panels found, using document dimensions");
         return {
@@ -191,7 +227,6 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
         };
       }
 
-      // Find the furthest bottom edge of all panels
       let maxBottom = 0;
       panels.forEach((panel) => {
         const rect = panel.getBoundingClientRect();
@@ -200,16 +235,12 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
         console.log(`Panel at bottom: ${bottom}px`);
       });
 
-      const bottomPadding = 50; // Extra space at bottom
-      
-      // Calculate final height to include all content
+      const bottomPadding = 50;
       const finalHeight = maxBottom + bottomPadding + '50px';
-      
-      // Get window width to ensure no horizontal cuts
       const windowWidth = window.innerWidth;
-      
+
       console.log(`Calculated dimensions - Width: ${windowWidth}px, Height: ${finalHeight}px`);
-      
+
       return {
         width: windowWidth,
         height: finalHeight
@@ -217,8 +248,7 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
     });
 
     console.log("Calculated dimensions:", dimensions);
-    
-    // Set viewport to match content dimensions
+
     await page.setViewport({
       width: Math.round(dimensions.width),
       height: Math.round(dimensions.height),
@@ -226,28 +256,16 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
       isMobile: false,
     });
 
-    // Perform a final scroll through to ensure all content is rendered
     await page.evaluate(async () => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const scrollable = document.querySelector(".scrollbar-view") || document.body;
-      
-      // Scroll to bottom to ensure all content is loaded
       scrollable.scrollTo(0, scrollable.scrollHeight);
       await sleep(1000);
-      
-      // Scroll back to top
       scrollable.scrollTo(0, 0);
       await sleep(500);
     });
-    
-    // Add header
-    const logoPath = path.join(
-      __dirname,
-      "..",
-      "public",
-      "images",
-      "Reporting_A1_logo.png"
-    );
+
+    const logoPath = path.join(__dirname, "..", "public", "images", "Reporting_A1_logo.png");
     const logoBase64 = fs.readFileSync(logoPath, { encoding: "base64" });
 
     await page.evaluate(
@@ -288,7 +306,6 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
                 box-sizing: border-box;
             `;
 
-        // Create container for dashboard title and date
         const infoContainer = document.createElement("div");
         infoContainer.style.cssText = `
                 display: flex;
@@ -297,7 +314,6 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
                 gap: 5px;
             `;
 
-        // Add dashboard title
         const titleDiv = document.createElement("div");
         titleDiv.style.cssText = `
                 font-size: 24px;
@@ -313,7 +329,6 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
                 color: #464646;
             `;
 
-        // Improved date handling
         const urlParams = new URL(url).searchParams;
         let from = urlParams.get("from");
         let to = urlParams.get("to");
@@ -345,8 +360,7 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
         if (from && to) {
           const fromDate = parseGrafanaTime(from);
           const toDate = parseGrafanaTime(to);
-          
-          // Use Macedonia locale (mk-MK) with Europe/Skopje timezone
+
           const dateOptions = {
             year: "numeric",
             month: "long",
@@ -355,10 +369,9 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
             minute: "2-digit",
             timeZone: "Europe/Skopje"
           };
-          
+
           dateText = `${fromDate.toLocaleString("en-US", dateOptions)} to ${toDate.toLocaleString("en-US", dateOptions)}`;
         } else {
-          // Use Macedonia locale (mk-MK) with Europe/Skopje timezone for current date
           dateText = new Date().toLocaleString("en-US", {
             year: "numeric",
             month: "long",
@@ -370,8 +383,6 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
         }
 
         dateDiv.textContent = dateText;
-
-        // Add title and date to the info container
         infoContainer.appendChild(titleDiv);
         infoContainer.appendChild(dateDiv);
 
@@ -447,13 +458,12 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
                 }
             `;
         document.head.appendChild(style);
-        
-        // Optimize layout for PDF
+
         document.documentElement.style.width = "100%";
         document.documentElement.style.margin = "0";
         document.documentElement.style.padding = "0";
         document.documentElement.style.overflow = "hidden";
-        
+
         document.body.style.width = "100%";
         document.body.style.margin = "0";
         document.body.style.padding = "50px 0 0 0";
@@ -470,7 +480,6 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
         `;
         document.head.appendChild(pageStyle);
 
-        // Target all possible containers
         const containers = document.querySelectorAll(".dashboard-container, .grafana-app, .main-view, .scroll-canvas, .view");
         containers.forEach(container => {
           if (container) {
@@ -508,8 +517,7 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
             content.style.padding = "0";
             content.style.margin = "0";
           }
-          
-          // Ensure all visualizations and charts are full width
+
           const visualizations = panel.querySelectorAll(".panel-visualization, .panel-content > div, svg, canvas");
           visualizations.forEach(viz => {
             viz.style.width = "100%";
@@ -518,16 +526,14 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
             viz.style.margin = "0";
           });
         });
-        
-        // Remove any grid layout margins
+
         const gridLayout = document.querySelector(".react-grid-layout");
         if (gridLayout) {
           gridLayout.style.width = "100%";
           gridLayout.style.margin = "0";
           gridLayout.style.padding = "0";
         }
-        
-        // Target grid items to ensure no margins
+
         const gridItems = document.querySelectorAll(".react-grid-item");
         gridItems.forEach(item => {
           item.style.margin = "0";
@@ -548,14 +554,13 @@ const auth_header = "Basic " + Buffer.from(auth_string).toString("base64");
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
       preferCSSPageSize: true,
       scale: 1.0,
-      pageRanges: '1',  // Ensure only one page is generated
+      pageRanges: '1',
     });
     console.log(`PDF generated: ${outfile}`);
 
     await browser.close();
     console.log("Browser closed.");
 
-    // Ensure outfile is a string before sending
     if (typeof outfile !== "string") {
       throw new Error("Output file path is not a string.");
     }
