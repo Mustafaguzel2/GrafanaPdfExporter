@@ -7,20 +7,20 @@ const ssl = config.ssl;
 
 const port = config.server.port;
 
-// SSL configuration
-const sslOptions = {
-    key: fs.readFileSync(ssl.key),
-    cert: fs.readFileSync(ssl.cert)
-};
+// Sertifika varsa HTTPS (rp1 / zabbixreporting), yoksa HTTP (rp2 / netview,
+// HTTPS'i A1 proxy'si karsiliyor)
+const hasSsl = ssl && ssl.key && ssl.cert && fs.existsSync(ssl.key) && fs.existsSync(ssl.cert);
 
-// Create HTTPS server
-const httpsServer = https.createServer(sslOptions, app);
-httpsServer.listen(port, () => {
-    console.log(`HTTPS Server is listening on port ${port}`);
-});
-
-// Create HTTP server (optional, for development)
-const httpServer = http.createServer(app);
-httpServer.listen(port + 1, () => {
-    console.log(`HTTP Server is listening on port ${port + 1}`);
-}); 
+if (hasSsl) {
+    const sslOptions = {
+        key: fs.readFileSync(ssl.key),
+        cert: fs.readFileSync(ssl.cert)
+    };
+    https.createServer(sslOptions, app).listen(port, () => {
+        console.log(`HTTPS Server is listening on port ${port}`);
+    });
+} else {
+    http.createServer(app).listen(port, () => {
+        console.log(`HTTP Server is listening on port ${port} (no SSL cert found)`);
+    });
+}
