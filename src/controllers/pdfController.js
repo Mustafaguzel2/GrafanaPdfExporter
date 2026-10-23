@@ -44,7 +44,12 @@ const generatePdf = async (req, res) => {
 
         // Use the correct path for grafana_pdf.js
         const scriptPath = path.join(__dirname, '..', 'utils', 'grafana_pdf.js');
-        const script = fork(scriptPath, [finalUrl, `${config.grafana.user}:${config.grafana.password}`]);
+        const script = fork(scriptPath, [
+            finalUrl,
+            `${config.grafana.user}:${config.grafana.password}`,
+            '',
+            req.grafanaCookies || ''
+        ]);
 
         script.on('message', (message) => {
             if (message.success) {
